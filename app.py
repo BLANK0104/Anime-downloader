@@ -1,10 +1,19 @@
-from flask import Flask, render_template, request, redirect, url_for, session, jsonify, flash
+# Fix for RecursionError - Monkey patch before ANY other imports
+import gevent.monkey
+gevent.monkey.patch_all(thread=False, select=False)
+
+# Standard library imports
 import os
-import kwik_token
-import pahe
 import threading
 import time
+
+# Third-party imports
+from flask import Flask, render_template, request, redirect, url_for, session, jsonify, flash
 from werkzeug.utils import secure_filename
+
+# Local imports
+import kwik_token
+import pahe
 
 app = Flask(__name__)
 app.secret_key = 'animepahedownloader_secret_key'  # Change this to a random secret key
