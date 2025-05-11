@@ -61,8 +61,16 @@ def get_episodes():
     try:
         start_ep = int(start_ep)
         end_ep = int(end_ep)
+        
+        # Limit the range to avoid timeouts in serverless environment
+        if end_ep - start_ep > 10:
+            end_ep = start_ep + 10
+            
         episode_ids = pahe.mid_apahe(session_id=anime_id, episode_range=[start_ep, end_ep])
         
+        if not episode_ids:
+            return jsonify({"error": "Failed to fetch episode IDs or no episodes found"}), 404
+            
         # Get download links for these episodes
         episodes_data = pahe.dl_apahe1(anime_id=anime_id, episode_ids=episode_ids)
         
@@ -72,20 +80,31 @@ def get_episodes():
         for key, value in episodes_data.items():
             sorted_links = {}
             for link_info in value:
-                link, size, lang = link_info
-                size = int(size.split('p')[0])
-                if lang == '':
-                    lang = 'jpn'
-                if lang not in sorted_links:
-                    sorted_links[lang] = {}
-                if size not in sorted_links[lang]:
-                    sorted_links[lang][size] = []
-                sorted_links[lang][size].append(link)
-            episodes[index] = sorted_links
+                if len(link_info) >= 2:  # Make sure we have at least link and size
+                    link, size = link_info[0], link_info[1]
+                    lang = link_info[2] if len(link_info) > 2 else ''
+                    
+                    if size and "p" in size:
+                        size = int(size.split('p')[0])
+                    else:
+                        continue  # Skip if size format is unexpected
+                        
+                    if lang == '':
+                        lang = 'jpn'
+                    if lang not in sorted_links:
+                        sorted_links[lang] = {}
+                    if size not in sorted_links[lang]:
+                        sorted_links[lang][size] = []
+                    sorted_links[lang][size].append(link)
+            
+            if sorted_links:  # Only add if we found links
+                episodes[index] = sorted_links
             index += 1
             
         return jsonify({"episodes": episodes})
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/download', methods=['POST'])
@@ -115,7 +134,7 @@ def download_episode():
         # Get download link
         episodes_data = pahe.dl_apahe1(anime_id=anime_id, episode_ids=episode_ids)
         
-        if not episodes_data or 0 not in episodes_data:
+        if not episodes_data or 0 not in episodes_data or not episodes_data[0]:
             return jsonify({"error": "Failed to get episode data"}), 500
         
         # Process available qualities and languages
@@ -124,30 +143,38 @@ def download_episode():
         # Check if language is available
         available_langs = []
         for link_info in episode_links:
-            _, _, link_lang = link_info
-            if link_lang == '':
-                link_lang = 'jpn'
-            if link_lang not in available_langs:
-                available_langs.append(link_lang)
+            if len(link_info) > 2:
+                _, _, link_lang = link_info
+                if link_lang == '':
+                    link_lang = 'jpn'
+                if link_lang not in available_langs:
+                    available_langs.append(link_lang)
         
+        if not available_langs:
+            available_langs = ['jpn']  # Default if no languages found
+            
         if lang not in available_langs:
             lang = available_langs[0]  # Default to first available language
         
         # Organize links by quality for the selected language
         quality_links = {}
         for link_info in episode_links:
-            link, size, link_lang = link_info
-            if link_lang == '' and lang == 'jpn':
-                link_lang = 'jpn'
-            
-            if link_lang == lang:
-                size_int = int(size.split('p')[0])
-                if size_int not in quality_links:
-                    quality_links[size_int] = []
-                quality_links[size_int].append(link)
+            if len(link_info) > 2:
+                link, size, link_lang = link_info
+                if link_lang == '' and lang == 'jpn':
+                    link_lang = 'jpn'
+                
+                if link_lang == lang and 'p' in size:
+                    size_int = int(size.split('p')[0])
+                    if size_int not in quality_links:
+                        quality_links[size_int] = []
+                    quality_links[size_int].append(link)
         
         # Find closest quality
         available_qualities = list(quality_links.keys())
+        if not available_qualities:
+            return jsonify({"error": f"No qualities available for language {lang}"}), 500
+            
         available_qualities.sort(reverse=True)
         
         selected_quality = None
@@ -164,12 +191,18 @@ def download_episode():
         
         # Get the redirect link
         redirect_link = pahe.dl_apahe2(quality_links[selected_quality][0])
-        
+        if not redirect_link:
+            return jsonify({"error": "Failed to get redirect link"}), 500
+            
         # Get the final download link
-        download_link = kwik_token.get_dl_link(redirect_link)
+        try:
+            download_link = kwik_token.get_dl_link(redirect_link)
+            if not download_link:
+                return jsonify({"error": "Failed to get download link"}), 500
+        except Exception as e:
+            return jsonify({"error": f"Error extracting download link: {str(e)}"}), 500
         
-        # For serverless environment, we can't store files locally
-        # Instead, return the direct download link to the client
+        # For serverless environment, return the direct download link
         return jsonify({
             "message": "Download link generated",
             "download_link": download_link,

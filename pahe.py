@@ -5,38 +5,44 @@ import requests
 import re
 import os
 from tqdm import tqdm
-from selenium import webdriver
-from selenium.webdriver.common.by import By
 
-
-
-session=requests.session()
-
+session = requests.session()
 
 # Base URL for animepahe.ru
 url = "https://animepahe.ru/"
 headers = {
-    "Cookie" : "__ddgid_=7lWyc52yRS7YgOpW; __ddgmark_=wfZpnxacF2nXdVTE; __ddg2_=qtEE5nKN3PCJ7c2Z; __ddg1_=5Qh2v4L5z7LpVnQx; __ddg3_=fHwWwZbYpI3fHcQx"
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+    "Accept": "application/json, text/javascript, */*; q=0.01",
+    "Accept-Language": "en-US,en;q=0.9",
+    "X-Requested-With": "XMLHttpRequest",
+    "Cookie": "__ddgid_=7lWyc52yRS7YgOpW; __ddgmark_=wfZpnxacF2nXdVTE; __ddg2_=qtEE5nKN3PCJ7c2Z; __ddg1_=5Qh2v4L5z7LpVnQx; __ddg3_=fHwWwZbYpI3fHcQx"
 }
 
-
-def get_url_response(url):
-        
-    print("Selenium Webdriver is starting...")
-    options = webdriver.ChromeOptions()
-    # options.add_argument('--headless')
+def get_json_response(url, retries=3, delay=1):
+    """
+    Get JSON response from a URL using pure requests.
+    Retries on failure and includes a delay between attempts.
     
-    driver = webdriver.Chrome(options=options)
-    driver.get(url)
-    # wait 6 seconds for page to load
-    sleep(10)
-    json_data = driver.find_element(By.TAG_NAME, 'pre')
-    json_data = json.loads(json_data.text)
-
-    driver.close()
-    print("Selenium Webdriver closed.")
-    return json_data
-
+    Parameters:
+        url (str): The URL to fetch
+        retries (int): Number of retry attempts
+        delay (int): Delay between retries in seconds
+    
+    Returns:
+        dict: JSON response data
+    """
+    for attempt in range(retries):
+        try:
+            response = session.get(url, headers=headers, timeout=10)
+            response.raise_for_status()  # Raise exception for 4XX/5XX responses
+            return response.json()
+        except Exception as e:
+            if attempt < retries - 1:
+                print(f"Request failed, retrying ({attempt+1}/{retries}): {e}")
+                sleep(delay)
+            else:
+                print(f"Failed to get response after {retries} attempts: {e}")
+                raise
 
 def search_apahe(query: str) -> list:
     """
@@ -56,17 +62,14 @@ def search_apahe(query: str) -> list:
             - Score
             - Session ID
     """
-    
-
     global url
     search_url = url + "api?m=search&q=" + query
 
-    response = session.get(search_url, headers=headers)
-    # print(response.status_code)
-    data = response.json()
-
-    # data = get_url_response(search_url)
-    # print(headers)
+    try:
+        data = get_json_response(search_url)
+    except Exception as e:
+        print(f"Search failed: {e}")
+        return []
 
     # if data is empty, return an empty list. i.e. no anime found
     if "data" not in data:
@@ -85,9 +88,7 @@ def search_apahe(query: str) -> list:
         clean_data.append(hmm)
     return clean_data
 
-# print(search_apahe("horimiya"))
-
-def mid_apahe(session_id: str , episode_range: list) -> list:
+def mid_apahe(session_id: str, episode_range: list) -> list:
     """
     Retrieve a list of episode IDs for the specified session ID within a given range.
     
@@ -98,33 +99,60 @@ def mid_apahe(session_id: str , episode_range: list) -> list:
     Returns:
         list: A list of episode IDs.
     """
-    # episode_range[0]=int(episode_range[0])
-    # episode_range[1]=int(episode_range[1])
-    pages=[1,2]
-    pages[0]+=(episode_range[0]//30)
-    pages[1]+=(episode_range[1]//30)
+    start_ep, end_ep = episode_range[0], episode_range[1]
+    
+    # Calculate pages more efficiently
+    # Each page has 30 episodes
+    start_page = (start_ep - 1) // 30 + 1
+    end_page = (end_ep - 1) // 30 + 1
+    
     global url
-    data = []
-
-    for page in range(pages[0],pages[1]):
-        url2 = url + "api?m=release&id=" + session_id + "&sort=episode_asc&page="+ str(page)
-        r = session.get(url2, headers=headers)
-        r = r.json()
-        # r = get_url_response(url2)
-        for i in r['data']:
-            s = str(i['session'])
-            data.append(s)
-
-    ret_data = data[(episode_range[0]%30)-1:30*(pages[1]-pages[0]-1)+episode_range[1]%30]
-    # print("ret_data : ", ret_data)
-    return ret_data
-
-#print(mid_apahe("e8e5a274-b2a0-ae45-de26-803004f3299b",[29,31]))
-
+    episode_ids = []
+    
+    # Batch requests for all required pages
+    page_urls = [
+        f"{url}api?m=release&id={session_id}&sort=episode_asc&page={page}" 
+        for page in range(start_page, end_page + 1)
+    ]
+    
+    responses = []
+    for page_url in page_urls:
+        try:
+            response = get_json_response(page_url)
+            responses.append(response)
+        except Exception as e:
+            print(f"Failed to get page {page_url}: {e}")
+            # Return empty list on error
+            return []
+    
+    # Process all responses
+    all_episodes = []
+    for response in responses:
+        if 'data' in response:
+            all_episodes.extend(response['data'])
+    
+    # Calculate start and end indices in the combined episode list
+    start_idx_in_first_page = (start_ep - 1) % 30
+    total_episodes = len(all_episodes)
+    
+    # Extract only the requested episode range
+    # First, calculate how many episodes we need from the start_ep to end_ep
+    needed_episodes = end_ep - start_ep + 1
+    
+    # Then, get only those episodes from all_episodes
+    relevant_episodes = all_episodes[start_idx_in_first_page:start_idx_in_first_page + needed_episodes]
+    
+    # Extract session IDs
+    for episode in relevant_episodes:
+        if 'session' in episode:
+            episode_ids.append(episode['session'])
+    
+    return episode_ids
 
 def dl_apahe1(anime_id: str, episode_ids: list) -> dict:
     """
-    Get a list of download links for the given episode IDs asynchronously.
+    Get a list of download links for the given episode IDs.
+    Uses individual requests instead of grequests for better compatibility.
     
     Parameters:
         anime_id (str): The anime ID.
@@ -134,26 +162,25 @@ def dl_apahe1(anime_id: str, episode_ids: list) -> dict:
         A dictionary where keys are episode indices and values are lists of download link information.
     """
     global url
-    urls = [f'{url}play/{anime_id}/{episode_id}' for episode_id in episode_ids]
-    # print("urls : ", urls)
-    response_futures = grequests.map((grequests.get(url=u, headers=headers) for u in urls), size=10)
-
     data_dict = {}
-    for index, response in enumerate(response_futures):
-        # print(response.status_code)
-        if response is not None and response.status_code == 200:
-            text = response.text
-            data = re.findall(r'href="(?:([^\"]+)" target="_blank" class="dropdown-item">(?:[^\&]+)&middot; ([^\<]+))(?:<span class="badge badge-primary">(?:[^\&]+)</span> <span class="badge badge-warning text-capitalize">([^\<]+))?', text)
-            data_dict[index] = data
-        else:
-            print(f"Episode {episode_ids[index]} could not be fetched.")
-
-    # print("data_dict : ",data_dict)
+    
+    # Process each episode sequentially for better stability
+    for index, episode_id in enumerate(episode_ids):
+        episode_url = f'{url}play/{anime_id}/{episode_id}'
+        try:
+            response = session.get(url=episode_url, headers=headers, timeout=10)
+            if response.status_code == 200:
+                text = response.text
+                data = re.findall(r'href="(?:([^\"]+)" target="_blank" class="dropdown-item">(?:[^\&]+)&middot; ([^\<]+))(?:<span class="badge badge-primary">(?:[^\&]+)</span> <span class="badge badge-warning text-capitalize">([^\<]+))?', text)
+                data_dict[index] = data
+            else:
+                print(f"Episode {episode_id} returned status code {response.status_code}")
+                data_dict[index] = []
+        except Exception as e:
+            print(f"Error fetching episode {episode_id}: {e}")
+            data_dict[index] = []
+            
     return data_dict
-
-# print(dl_apahe1("13e4f8aa-169f-41cc-b7a1-218c88e3b8d2",["9ea4686f8cd114f3d9c065ab113b49a637f8b23dda5bebcf3c7a1aca20e8e371","d8c696836ba4bbdaff7ad3ca5450b410bbf7eec81832f167c3f7d8231eeaa5e1"]))
-# print(dl_apahe1("13e4f8aa-169f-41cc-b7a1-218c88e3b8d2","d8c696836ba4bbdaff7ad3ca5450b410bbf7eec81832f167c3f7d8231eeaa5e1"))
-
 
 def dl_apahe2(url: str) -> str:
     """
@@ -165,11 +192,17 @@ def dl_apahe2(url: str) -> str:
     Returns:
         The final download link.
     """
-    r = requests.get(url)
-    redirect_link = (re.findall(r'(https://kwik\.[a-z]+/[^"]+)', r.text))[0]
-    return redirect_link
-
-# print(dl_apahe2("https://pahe.win/HVLTy"))
+    try:
+        r = requests.get(url, timeout=10)
+        redirect_links = re.findall(r'(https://kwik\.[a-z]+/[^"]+)', r.text)
+        if redirect_links:
+            return redirect_links[0]
+        else:
+            print("No kwik link found in response")
+            return ""
+    except Exception as e:
+        print(f"Error getting kwik link: {e}")
+        return ""
 
 def download_file(url, destination):
     if os.path.exists(destination):

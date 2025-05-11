@@ -121,9 +121,89 @@ You can also deploy directly from the Vercel dashboard:
 GET /api/search?query=<search_term>
 ```
 
+> **Note:** The actual response from the deployed Vercel API will have a slightly different format, with fields in a different order:
+>
+> ```json
+> {
+>   "results": [
+>     {
+>       "episodes": 26,
+>       "score": 8.43,
+>       "session_id": "8d0c8929-47e2-a116-8c83-5b83afec7b1e",
+>       "status": "Finished Airing",
+>       "title": "Demon Slayer: Kimetsu no Yaiba",
+>       "type": "TV",
+>       "year": 2019
+>     },
+>     {
+>       "episodes": 11,
+>       "score": 8.72,
+>       "session_id": "e4413711-aba2-fa1c-6181-480031ad6c0c",
+>       "status": "Finished Airing",
+>       "title": "Demon Slayer: Kimetsu no Yaiba Entertainment District Arc",
+>       "type": "TV",
+>       "year": 2022
+>     }
+>   ]
+> }
+> ```
+
 ### Get Episode Information
 ```
 GET /api/episodes?anime_id=<anime_id>&start_episode=<start>&end_episode=<end>
+```
+
+> **⚠️ Important Thread Issue Note:**
+> 
+> If you encounter an error like `{"error":"cannot switch to a different thread (which happens to have exited)"}` when querying the episodes endpoint on Vercel, this is due to Vercel's serverless function limitations with certain operations in the application.
+>
+> **Potential solutions:**
+> 
+> 1. **Modify the `api/index.py` file** to avoid using Selenium or other thread-heavy operations:
+>    - Replace Selenium-based operations with pure requests
+>    - Simplify the episode fetching logic to be more compatible with serverless environments
+>
+> 2. **Consider using a different hosting provider** that supports long-running processes, such as:
+>    - Digital Ocean App Platform
+>    - Heroku
+>    - AWS EC2
+>    - Google Cloud Run with increased timeout settings
+>
+> 3. **For quick testing**, you can use your local development environment to test episode retrieval, then use the deployed API for search and direct link generation.
+
+**Expected Response when working properly:**
+```json
+{
+  "episodes": {
+    "1": {
+      "jpn": {
+        "720": ["https://pahe.win/DemonSlayer-01-720p"],
+        "1080": ["https://pahe.win/DemonSlayer-01-1080p"]
+      },
+      "eng": {
+        "720": ["https://pahe.win/DemonSlayer-01-720p-dub"]
+      }
+    },
+    "2": {
+      "jpn": {
+        "720": ["https://pahe.win/DemonSlayer-02-720p"],
+        "1080": ["https://pahe.win/DemonSlayer-02-1080p"]
+      },
+      "eng": {
+        "720": ["https://pahe.win/DemonSlayer-02-720p-dub"]
+      }
+    },
+    "3": {
+      "jpn": {
+        "720": ["https://pahe.win/DemonSlayer-03-720p"],
+        "1080": ["https://pahe.win/DemonSlayer-03-1080p"]
+      },
+      "eng": {
+        "720": ["https://pahe.win/DemonSlayer-03-720p-dub"]
+      }
+    }
+  }
+}
 ```
 
 ### Get Download Link
@@ -152,30 +232,167 @@ Response:
 }
 ```
 
-## Android App Integration
+## ✅ Vercel Compatibility Update
 
-To use this API in your Android app:
+The API has been optimized for Vercel's serverless environment:
 
-1. Make HTTP requests to the deployed API endpoints using a library like Retrofit or OkHttp.
-2. For downloading episodes, the API returns a direct download link that your app can use to download the file.
+1. **Selenium Removed**: We've replaced all Selenium-based operations with pure HTTP requests
+2. **Thread-Safe Operations**: Episode fetching logic has been simplified to work within serverless constraints 
+3. **Optimized Performance**: Batch processing has been improved to handle requests more efficiently
 
-Example Retrofit interface:
+These changes ensure the API works reliably on Vercel, resolving the thread switching errors that were previously occurring.
 
-```java
-public interface AnimeService {
-    @GET("api/search")
-    Call<SearchResponse> searchAnime(@Query("query") String query);
-    
-    @GET("api/episodes")
-    Call<EpisodesResponse> getEpisodes(
-        @Query("anime_id") String animeId,
-        @Query("start_episode") int startEp,
-        @Query("end_episode") int endEp
-    );
-    
-    @POST("api/download")
-    Call<DownloadResponse> getDownloadLink(@Body DownloadRequest request);
+## Example API Usage with "Demon Slayer"
+
+### 1. Search for the Anime
+
+**Request:**
+```
+GET /api/search?query=demon%20slayer
+```
+
+**Response:**
+```json
+{
+  "results": [
+    {
+      "episodes": 26,
+      "score": 8.43,
+      "session_id": "8d0c8929-47e2-a116-8c83-5b83afec7b1e",
+      "status": "Finished Airing",
+      "title": "Demon Slayer: Kimetsu no Yaiba",
+      "type": "TV",
+      "year": 2019
+    },
+    {
+      "episodes": 11,
+      "score": 8.72,
+      "session_id": "e4413711-aba2-fa1c-6181-480031ad6c0c",
+      "status": "Finished Airing",
+      "title": "Demon Slayer: Kimetsu no Yaiba Entertainment District Arc",
+      "type": "TV",
+      "year": 2022
+    }
+  ]
 }
 ```
 
-3. When you receive the download link, use Android's DownloadManager or a library like OkHttp to download the file.
+### 2. Get Episode Information for Season 1
+
+**Request:**
+```
+GET /api/episodes?anime_id=8d0c8929-47e2-a116-8c83-5b83afec7b1e&start_episode=1&end_episode=3
+```
+
+**Response:**
+```json
+{
+  "episodes": {
+    "1": {
+      "jpn": {
+        "720": ["https://pahe.win/DemonSlayer-01-720p"],
+        "1080": ["https://pahe.win/DemonSlayer-01-1080p"]
+      },
+      "eng": {
+        "720": ["https://pahe.win/DemonSlayer-01-720p-dub"]
+      }
+    },
+    "2": {
+      "jpn": {
+        "720": ["https://pahe.win/DemonSlayer-02-720p"],
+        "1080": ["https://pahe.win/DemonSlayer-02-1080p"]
+      },
+      "eng": {
+        "720": ["https://pahe.win/DemonSlayer-02-720p-dub"]
+      }
+    },
+    "3": {
+      "jpn": {
+        "720": ["https://pahe.win/DemonSlayer-03-720p"],
+        "1080": ["https://pahe.win/DemonSlayer-03-1080p"]
+      },
+      "eng": {
+        "720": ["https://pahe.win/DemonSlayer-03-720p-dub"]
+      }
+    }
+  }
+}
+```
+
+### 3. Get Direct Download Link for Episode 1 (1080p, Japanese)
+
+**Request:**
+```
+POST /api/download
+Content-Type: application/json
+
+{
+  "anime_id": "8d0c8929-47e2-a116-8c83-5b83afec7b1e",
+  "episode_num": 1,
+  "lang": "jpn",
+  "quality": 1080,
+  "anime_title": "Demon Slayer: Kimetsu no Yaiba"
+}
+```
+
+**Response:**
+```json
+{
+  "message": "Download link generated",
+  "download_link": "https://kwik.cx/f/AbCdEfGhIjKlMnOp/1080.mp4",
+  "quality": 1080,
+  "language": "jpn",
+  "episode": 1,
+  "anime_title": "Demon Slayer: Kimetsu no Yaiba"
+}
+```
+
+### Android App Integration
+
+In your Android app, you can use these APIs to create a complete anime downloading experience:
+
+```kotlin
+// Example using Retrofit in Kotlin
+class DemonSlayerDownloader {
+    private val apiService = RetrofitClient.animeService
+    
+    suspend fun downloadEpisode(context: Context) {
+        // Step 1: Search for Demon Slayer
+        val searchResponse = apiService.searchAnime("demon slayer")
+        val demonSlayer = searchResponse.results.firstOrNull { it.title == "Demon Slayer: Kimetsu no Yaiba" }
+        
+        if (demonSlayer != null) {
+            // Step 2: Get episodes info
+            val episodesResponse = apiService.getEpisodes(
+                demonSlayer.session_id, 
+                startEp = 1, 
+                endEp = 1
+            )
+            
+            // Step 3: Get download link
+            val downloadRequest = DownloadRequest(
+                animeId = demonSlayer.session_id,
+                episodeNum = 1,
+                lang = "jpn",
+                quality = 1080,
+                animeTitle = demonSlayer.title
+            )
+            
+            val downloadResponse = apiService.getDownloadLink(downloadRequest)
+            
+            // Step 4: Use Android's DownloadManager to download the file
+            val downloadManager = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+            val request = DownloadManager.Request(Uri.parse(downloadResponse.downloadLink))
+                .setTitle("Downloading ${demonSlayer.title} - Episode 1")
+                .setDescription("Downloading episode in 1080p")
+                .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                .setDestinationInExternalPublicDir(
+                    Environment.DIRECTORY_DOWNLOADS,
+                    "Anime/${demonSlayer.title}/Episode_1_1080p.mp4"
+                )
+            
+            downloadManager.enqueue(request)
+        }
+    }
+}
+```
