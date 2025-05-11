@@ -72,6 +72,48 @@ This is a Flask-based API that provides access to AnimePahe downloader functiona
    python app.py
    ```
 
+## Deployment
+
+### Vercel Deployment
+
+AnimePaheDownloader API can be easily deployed on Vercel's serverless platform:
+
+1. Install the Vercel CLI:
+   ```
+   npm install -g vercel
+   ```
+
+2. Navigate to your project directory:
+   ```
+   cd path/to/AnimePaheDownloader
+   ```
+
+3. Deploy to Vercel:
+   ```
+   vercel
+   ```
+
+4. Follow the prompts to configure your project:
+   - Set up a new Vercel project
+   - Link to an existing project or create a new one
+   - Confirm the project root directory
+
+5. Once deployed, Vercel will give you a URL for your API.
+
+### Alternative Deployment Method
+
+You can also deploy directly from the Vercel dashboard:
+
+1. Push your code to a GitHub repository
+2. Log in to your Vercel account
+3. Click "New Project"
+4. Import your GitHub repository
+5. Configure the project settings:
+   - Framework preset: Other
+   - Build command: None
+   - Output directory: None
+6. Click "Deploy"
+
 ## API Endpoints
 
 ### Search for Anime
@@ -84,7 +126,7 @@ GET /api/search?query=<search_term>
 GET /api/episodes?anime_id=<anime_id>&start_episode=<start>&end_episode=<end>
 ```
 
-### Start Download
+### Get Download Link
 ```
 POST /api/download
 Content-Type: application/json
@@ -98,31 +140,42 @@ Content-Type: application/json
 }
 ```
 
-### Get Download Status
+Response:
+```json
+{
+  "message": "Download link generated",
+  "download_link": "https://example.com/download/path/file.mp4",
+  "quality": 720,
+  "language": "eng",
+  "episode": 1,
+  "anime_title": "Title of Anime"
+}
 ```
-GET /api/download/status/<download_id>
-```
-
-### List All Downloads
-```
-GET /api/download/list
-```
-
-### Download File
-```
-GET /api/download/file/<download_id>
-```
-
-## Deployment
-
-The application includes a Procfile for deploying to Heroku or similar platforms.
-```
-heroku create
-git push heroku main
-```
-
-You can also deploy to other platforms that support Python web applications.
 
 ## Android App Integration
 
-To use this API in your Android app, make HTTP requests to the deployed API endpoints using a library like Retrofit or OkHttp.
+To use this API in your Android app:
+
+1. Make HTTP requests to the deployed API endpoints using a library like Retrofit or OkHttp.
+2. For downloading episodes, the API returns a direct download link that your app can use to download the file.
+
+Example Retrofit interface:
+
+```java
+public interface AnimeService {
+    @GET("api/search")
+    Call<SearchResponse> searchAnime(@Query("query") String query);
+    
+    @GET("api/episodes")
+    Call<EpisodesResponse> getEpisodes(
+        @Query("anime_id") String animeId,
+        @Query("start_episode") int startEp,
+        @Query("end_episode") int endEp
+    );
+    
+    @POST("api/download")
+    Call<DownloadResponse> getDownloadLink(@Body DownloadRequest request);
+}
+```
+
+3. When you receive the download link, use Android's DownloadManager or a library like OkHttp to download the file.

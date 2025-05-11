@@ -1,31 +1,28 @@
-from flask import Flask, request, jsonify, send_file
+from flask import Flask, request, jsonify
 from flask_cors import CORS
 import os
+import sys
+
+# Add parent directory to path to import modules
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import pahe
 import kwik_token
-import json
-import threading
-import time
-from werkzeug.utils import secure_filename
-import requests
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes
 
-# Dictionary to track download status
-downloads = {}
-
-# Set the working directory - for local development
-script_directory = os.path.dirname(os.path.realpath(__file__))
-DOWNLOAD_FOLDER = os.path.join(script_directory, "Downloads")
-os.makedirs(DOWNLOAD_FOLDER, exist_ok=True)
-
-# Helper function to replace special characters
-def replace_special_characters(input_string, replacement="_"):
-    special_characters = "!@#$%^&*()_+{}[]|\\:;<>,.?/~` "
-    for char in special_characters:
-        input_string = input_string.replace(char, replacement)
-    return input_string
+@app.route('/', methods=['GET'])
+def home():
+    return jsonify({
+        "status": "online",
+        "message": "AnimePaheDownloader API is running",
+        "endpoints": [
+            "/api/search?query=<search_term>",
+            "/api/episodes?anime_id=<anime_id>&start_episode=<start>&end_episode=<end>",
+            "/api/download (POST)"
+        ]
+    })
 
 @app.route('/api/search', methods=['GET'])
 def search_anime():
@@ -187,17 +184,10 @@ def download_episode():
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
-@app.route('/api/download/status', methods=['GET'])
-def get_download_status():
-    # This endpoint is simplified for serverless environment
-    return jsonify({"message": "Serverless environment doesn't support long-running download tracking"})
+# Serverless entry point
+app.debug = False
+app = app.wsgi_app
 
-@app.route('/api/download/list', methods=['GET'])
-def list_downloads():
-    # This endpoint is simplified for serverless environment
-    return jsonify({"message": "Serverless environment doesn't support download history tracking"})
-
-# For local development only
+# For local testing only
 if __name__ == '__main__':
-    os.makedirs(DOWNLOAD_FOLDER, exist_ok=True)
     app.run(host='0.0.0.0', port=5000, debug=True)
