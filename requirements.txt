@@ -1,7 +1,9 @@
-grequests
-requests
-tqdm
-colorama
-simple_term_menu
-selenium
-simplejson
+flask==2.3.3
+flask-cors==4.0.0
+grequests==0.6.0
+requests==2.31.0
+tqdm==4.66.1
+selenium==4.12.0
+colorama==0.4.6
+werkzeug==2.3.7
+gunicorn==21.2.0

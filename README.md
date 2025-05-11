@@ -24,8 +24,6 @@ AnimeDownloader is your trusty sidekick in the world of anime. It's your one-sto
 2. Install the required Python libraries using `pip install -r requirements.txt`.
 3. Run the `main.py` script and let the anime magic begin! 🧙
 
-
-
 ## AnimePahe Magic ◕⩊◕
 
 We've integrated AnimePahe's superpowers to fetch your episodes seamlessly. Say goodbye to buffering! 🧙‍♂️🎩
@@ -37,7 +35,6 @@ We welcome fellow anime enthusiasts to join our crew! Pull requests are like Shu
 ## License 📜
 
 This project is licensed under the GNU License. It's as free as a Pikachu in the wild! ⚡🐭
-
 
 ## Disclaimer ⚠️
 
@@ -54,4 +51,78 @@ AnimePahe is known to change its base URL from time to time. If you encounter is
 2. Locate the `url` variable at the beginning of the file, which contains the current AnimePahe base URL:
 
    `url = "https://animepahe.ru/"`
+
    Update with the Current Url
+
+---
+
+# AnimePaheDownloader API
+
+This is a Flask-based API that provides access to AnimePahe downloader functionality.
+
+## Installation
+
+1. Clone the repository
+2. Install dependencies:
+   ```
+   pip install -r requirements.txt
+   ```
+3. Run the Flask application:
+   ```
+   python app.py
+   ```
+
+## API Endpoints
+
+### Search for Anime
+```
+GET /api/search?query=<search_term>
+```
+
+### Get Episode Information
+```
+GET /api/episodes?anime_id=<anime_id>&start_episode=<start>&end_episode=<end>
+```
+
+### Start Download
+```
+POST /api/download
+Content-Type: application/json
+
+{
+  "anime_id": "session_id",
+  "episode_num": 1,
+  "lang": "eng",
+  "quality": 720,
+  "anime_title": "Title of Anime"
+}
+```
+
+### Get Download Status
+```
+GET /api/download/status/<download_id>
+```
+
+### List All Downloads
+```
+GET /api/download/list
+```
+
+### Download File
+```
+GET /api/download/file/<download_id>
+```
+
+## Deployment
+
+The application includes a Procfile for deploying to Heroku or similar platforms.
+```
+heroku create
+git push heroku main
+```
+
+You can also deploy to other platforms that support Python web applications.
+
+## Android App Integration
+
+To use this API in your Android app, make HTTP requests to the deployed API endpoints using a library like Retrofit or OkHttp.

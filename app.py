@@ -1,284 +1,288 @@
-# Fix for RecursionError - Monkey patch before ANY other imports
-import gevent.monkey
-gevent.monkey.patch_all(thread=False, select=False)
-
-# Standard library imports
+from flask import Flask, request, jsonify, send_file
+from flask_cors import CORS
 import os
+import pahe
+import kwik_token
+import json
 import threading
 import time
-
-# Third-party imports
-from flask import Flask, render_template, request, redirect, url_for, session, jsonify, flash
 from werkzeug.utils import secure_filename
 
-# Local imports
-import kwik_token
-import pahe
-
 app = Flask(__name__)
-app.secret_key = 'animepahedownloader_secret_key'  # Change this to a random secret key
-app.config['DOWNLOAD_FOLDER'] = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'Downloads')
+CORS(app)  # Enable CORS for all routes
 
-# Ensure download directory exists
-if not os.path.exists(app.config['DOWNLOAD_FOLDER']):
-    os.makedirs(app.config['DOWNLOAD_FOLDER'])
+# Dictionary to track download status
+downloads = {}
 
-# Dictionary to store download progress
-download_status = {}
+# Set the working directory
+script_directory = os.path.dirname(os.path.realpath(__file__))
+DOWNLOAD_FOLDER = os.path.join(script_directory, "Downloads")
+os.makedirs(DOWNLOAD_FOLDER, exist_ok=True)
 
-# Function to replace special characters in a string
+# Helper function to replace special characters
 def replace_special_characters(input_string, replacement="_"):
     special_characters = "!@#$%^&*()_+{}[]|\\:;<>,.?/~` "
     for char in special_characters:
         input_string = input_string.replace(char, replacement)
     return input_string
 
-# Function to extract anime titles and year to show in results
-def get_titles_from_result(list_of_anime):
-    return [f"{anime[0]} - {anime[4]} ({anime[1]})" for anime in list_of_anime]
-
-# Download thread function
-def download_episodes(anime_title, episodes, lang, quality):
-    global download_status
-    download_id = f"{anime_title}_{lang}_{quality}"
-    download_status[download_id] = {
-        'status': 'starting',
-        'progress': 0,
-        'total': len(episodes),
-        'completed': 0,
-        'current_episode': 0,
-        'message': 'Preparing to download...'
-    }
-    
-    title = replace_special_characters(anime_title)
-    download_dir = os.path.join(app.config['DOWNLOAD_FOLDER'], title)
-    if not os.path.exists(download_dir):
-        os.makedirs(download_dir)
-    
-    download_status[download_id]['status'] = 'downloading'
-    
-    for episode_num, url in episodes.items():
-        try:
-            download_status[download_id]['current_episode'] = episode_num
-            download_status[download_id]['message'] = f"Getting download link for episode {episode_num}..."
-            
-            download_link = kwik_token.get_dl_link(url)
-            destination = os.path.join(download_dir, f"{episode_num}_{lang}_{quality}.mp4")
-            
-            download_status[download_id]['message'] = f"Downloading episode {episode_num}..."
-            pahe.download_file(url=download_link, destination=destination)
-            
-            download_status[download_id]['completed'] += 1
-            download_status[download_id]['progress'] = int((download_status[download_id]['completed'] / download_status[download_id]['total']) * 100)
-        except Exception as e:
-            download_status[download_id]['message'] = f"Error downloading episode {episode_num}: {str(e)}"
-            continue
-    
-    download_status[download_id]['status'] = 'completed'
-    download_status[download_id]['message'] = 'Download completed!'
-
-@app.route('/')
-def index():
-    return render_template('index.html')
-
-@app.route('/search', methods=['GET', 'POST'])
-def search():
-    if request.method == 'POST':
-        query = request.form['query']
-        if not query:
-            flash('Please enter a search query', 'error')
-            return redirect(url_for('index'))
-            
-        list_of_anime = pahe.search_apahe(query)
-        
-        if len(list_of_anime) == 0:
-            flash('No anime found!', 'error')
-            return redirect(url_for('index'))
-        
-        session['search_results'] = list_of_anime
-        return redirect(url_for('results'))
-    
-    return redirect(url_for('index'))
-
-@app.route('/results')
-def results():
-    if 'search_results' not in session:
-        flash('Please search for anime first', 'error')
-        return redirect(url_for('index'))
-        
-    list_of_anime = session['search_results']
-    list_of_titles = get_titles_from_result(list_of_anime)
-    return render_template('results.html', titles=list_of_titles, anime_list=list_of_anime)
-
-@app.route('/anime/<int:anime_index>')
-def anime_detail(anime_index):
-    if 'search_results' not in session:
-        flash('Please search for anime first', 'error')
-        return redirect(url_for('index'))
-    
-    list_of_anime = session['search_results']
-    if anime_index < 0 or anime_index >= len(list_of_anime):
-        flash('Invalid anime selection', 'error')
-        return redirect(url_for('results'))
-    
-    selected_anime = list_of_anime[anime_index]
-    session['selected_anime'] = selected_anime
-    
-    return render_template('anime_detail.html', anime=selected_anime)
-
-@app.route('/episodes', methods=['POST'])
-def select_episodes():
-    if 'selected_anime' not in session:
-        flash('Please select an anime first', 'error')
-        return redirect(url_for('results'))
-    
-    selected_anime = session['selected_anime']
-    anime_id = selected_anime[6]
-    total_episodes = selected_anime[2]
-    
-    episode_start = request.form.get('episode_start', '1')
-    episode_end = request.form.get('episode_end', str(total_episodes))
+@app.route('/api/search', methods=['GET'])
+def search_anime():
+    query = request.args.get('query', '')
+    if not query:
+        return jsonify({"error": "Query parameter is required"}), 400
     
     try:
-        episode_start = int(episode_start)
-        episode_end = int(episode_end)
+        results = pahe.search_apahe(query)
+        formatted_results = []
         
-        if episode_start < 1 or episode_start > total_episodes or episode_end > total_episodes:
-            flash('Episode range exceeds total number of episodes', 'error')
-            return redirect(url_for('anime_detail', anime_index=session['search_results'].index(selected_anime)))
-    except ValueError:
-        flash('Please enter valid episode numbers', 'error')
-        return redirect(url_for('anime_detail', anime_index=session['search_results'].index(selected_anime)))
-    
-    episode_range = [episode_start, episode_end]
-    session['episode_range'] = episode_range
-    
-    # Fetch episode IDs
-    episode_ids = pahe.mid_apahe(session_id=anime_id, episode_range=episode_range)
-    
-    # Fetch episode download links
-    episodes_data = pahe.dl_apahe1(anime_id=anime_id, episode_ids=episode_ids)
-    
-    # Organize episode data
-    episodes = {}
-    index = episode_range[0]
-    for key, value in episodes_data.items():
-        sorted_links = {}
-        for link_info in value:
-            link, size, lang = link_info
-            size = int(size.split('p')[0])
-            if lang == '':
-                lang = 'jpn'
-            if lang not in sorted_links:
-                sorted_links[lang] = {}
-            if size not in sorted_links[lang]:
-                sorted_links[lang][size] = []
-            sorted_links[lang][size].append(link)
-        episodes[index] = sorted_links
-        index += 1
-    
-    session['episodes_data'] = episodes
-    
-    # Get available languages and qualities from first episode
-    available_langs = list(episodes[episode_range[0]].keys())
-    
-    return render_template('quality_selection.html', 
-                          languages=available_langs, 
-                          anime_title=selected_anime[0])
+        for anime in results:
+            formatted_results.append({
+                "title": anime[0],
+                "type": anime[1],
+                "episodes": anime[2],
+                "status": anime[3],
+                "year": anime[4],
+                "score": anime[5],
+                "session_id": anime[6]
+            })
+        
+        return jsonify({"results": formatted_results})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
-@app.route('/download', methods=['POST'])
-def download():
-    if 'episodes_data' not in session or 'selected_anime' not in session:
-        flash('Please select episodes first', 'error')
-        return redirect(url_for('index'))
+@app.route('/api/episodes', methods=['GET'])
+def get_episodes():
+    anime_id = request.args.get('anime_id', '')
+    start_ep = request.args.get('start_episode', 1)
+    end_ep = request.args.get('end_episode', 1)
     
-    selected_anime = session['selected_anime']
-    episodes = session['episodes_data']
-    episode_range = session['episode_range']
+    if not anime_id:
+        return jsonify({"error": "anime_id parameter is required"}), 400
     
-    # Get user selections
-    lang = request.form.get('language')
-    quality = request.form.get('quality')
-    
-    if not lang or not quality:
-        flash('Please select language and quality', 'error')
-        return redirect(url_for('episodes'))
-    
-    # Update episodes dictionary to contain selected download link
-    final_episodes = {}
-    for key, items in episodes.items():
-        if lang not in items:
-            flash(f'Language {lang} not available for episode {key}', 'warning')
-            continue
+    try:
+        start_ep = int(start_ep)
+        end_ep = int(end_ep)
+        episode_ids = pahe.mid_apahe(session_id=anime_id, episode_range=[start_ep, end_ep])
+        
+        # Get download links for these episodes
+        episodes_data = pahe.dl_apahe1(anime_id=anime_id, episode_ids=episode_ids)
+        
+        # Organize episode data
+        episodes = {}
+        index = start_ep
+        for key, value in episodes_data.items():
+            sorted_links = {}
+            for link_info in value:
+                link, size, lang = link_info
+                size = int(size.split('p')[0])
+                if lang == '':
+                    lang = 'jpn'
+                if lang not in sorted_links:
+                    sorted_links[lang] = {}
+                if size not in sorted_links[lang]:
+                    sorted_links[lang][size] = []
+                sorted_links[lang][size].append(link)
+            episodes[index] = sorted_links
+            index += 1
             
-        backup_quality = sorted(list(episodes[key][lang].keys()))[0]  # Use the first quality as backup
+        return jsonify({"episodes": episodes})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/download', methods=['POST'])
+def download_episode():
+    data = request.json
+    
+    # Required parameters
+    anime_id = data.get('anime_id')
+    episode_num = data.get('episode_num')
+    lang = data.get('lang', 'jpn')
+    quality = data.get('quality')
+    anime_title = data.get('anime_title')
+    
+    if not all([anime_id, episode_num, quality, anime_title]):
+        return jsonify({"error": "Missing required parameters"}), 400
+    
+    try:
+        # Convert parameters to appropriate types
+        episode_num = int(episode_num)
+        quality = int(quality)
         
-        try:
-            # Convert quality to integer for proper comparison
-            quality_int = int(quality)
+        # Get episode ID
+        episode_ids = pahe.mid_apahe(session_id=anime_id, episode_range=[episode_num, episode_num])
+        if not episode_ids:
+            return jsonify({"error": "Episode not found"}), 404
+        
+        # Get download link
+        episodes_data = pahe.dl_apahe1(anime_id=anime_id, episode_ids=episode_ids)
+        
+        if not episodes_data or 0 not in episodes_data:
+            return jsonify({"error": "Failed to get episode data"}), 500
+        
+        # Process available qualities and languages
+        episode_links = episodes_data[0]
+        
+        # Check if language is available
+        available_langs = []
+        for link_info in episode_links:
+            _, _, link_lang = link_info
+            if link_lang == '':
+                link_lang = 'jpn'
+            if link_lang not in available_langs:
+                available_langs.append(link_lang)
+        
+        if lang not in available_langs:
+            lang = available_langs[0]  # Default to first available language
+        
+        # Organize links by quality for the selected language
+        quality_links = {}
+        for link_info in episode_links:
+            link, size, link_lang = link_info
+            if link_lang == '' and lang == 'jpn':
+                link_lang = 'jpn'
             
-            # Check if exact quality is available
-            if quality_int in episodes[key][lang]:
-                final_episodes[key] = episodes[key][lang][quality_int][0]
-            else:
-                # Find closest available quality if exact match not available
-                available_qualities = sorted(list(episodes[key][lang].keys()), reverse=True)
-                
-                # Find closest lower quality
-                closest_quality = None
-                for q in available_qualities:
-                    if q <= quality_int:
-                        closest_quality = q
-                        break
-                
-                # If no lower quality, take highest available
-                if closest_quality is None:
-                    closest_quality = available_qualities[0]
-                
-                final_episodes[key] = episodes[key][lang][closest_quality][0]
-                flash(f"Selected quality {quality}p not available for episode {key}, using {closest_quality}p instead", 'info')
-        except Exception as e:
-            try:
-                # Use backup quality as last resort
-                final_episodes[key] = episodes[key][lang][backup_quality][0]
-                flash(f"Using fallback quality for episode {key}", 'info')
-            except:
-                flash(f"Failed to find suitable quality for episode {key}", 'error')
-                pass
-    
-    # Fetch video links
-    kwik_episodes = {}
-    for key, value in final_episodes.items():
-        kwik_episodes[key] = pahe.dl_apahe2(value)
-    
-    # Start downloading in a separate thread
-    download_thread = threading.Thread(
-        target=download_episodes,
-        args=(selected_anime[0], kwik_episodes, lang, quality)
-    )
-    download_thread.daemon = True
-    download_thread.start()
-    
-    download_id = f"{selected_anime[0]}_{lang}_{quality}"
-    session['download_id'] = download_id
-    
-    return redirect(url_for('download_status'))
-
-@app.route('/download_status')
-def download_status_page():
-    download_id = session.get('download_id')
-    if not download_id or download_id not in download_status:
-        flash('No active download found', 'error')
-        return redirect(url_for('index'))
+            if link_lang == lang:
+                size_int = int(size.split('p')[0])
+                if size_int not in quality_links:
+                    quality_links[size_int] = []
+                quality_links[size_int].append(link)
         
-    return render_template('download_status.html', download_id=download_id)
+        # Find closest quality
+        available_qualities = list(quality_links.keys())
+        available_qualities.sort(reverse=True)
+        
+        selected_quality = None
+        for q in available_qualities:
+            if q <= quality:
+                selected_quality = q
+                break
+        
+        if selected_quality is None and available_qualities:
+            selected_quality = available_qualities[0]
+        
+        if not selected_quality:
+            return jsonify({"error": "No suitable quality found"}), 500
+        
+        # Get the redirect link
+        redirect_link = pahe.dl_apahe2(quality_links[selected_quality][0])
+        
+        # Get the final download link
+        download_link = kwik_token.get_dl_link(redirect_link)
+        
+        # Create download directory
+        title = replace_special_characters(anime_title)
+        download_dir = os.path.join(DOWNLOAD_FOLDER, title)
+        os.makedirs(download_dir, exist_ok=True)
+        
+        # Set download destination
+        destination = os.path.join(download_dir, f"{episode_num}_{lang}_{selected_quality}p.mp4")
+        
+        # Generate a unique download ID
+        download_id = f"{title}_{episode_num}_{int(time.time())}"
+        
+        # Start download in a separate thread
+        downloads[download_id] = {
+            "status": "queued",
+            "progress": 0,
+            "file_path": destination,
+            "anime_title": title,
+            "episode": episode_num,
+            "quality": selected_quality
+        }
+        
+        # Start download thread
+        thread = threading.Thread(
+            target=download_file_thread,
+            args=(download_link, destination, download_id)
+        )
+        thread.daemon = True
+        thread.start()
+        
+        return jsonify({
+            "message": "Download started",
+            "download_id": download_id,
+            "file_name": os.path.basename(destination),
+            "quality": selected_quality,
+            "language": lang
+        })
+        
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
 
-@app.route('/api/download_status/<download_id>', methods=['GET'])
+def download_file_thread(url, destination, download_id):
+    try:
+        downloads[download_id]["status"] = "downloading"
+        
+        # Custom progress tracking class
+        class ProgressTracker:
+            def __init__(self, download_id):
+                self.download_id = download_id
+                self.total = 0
+                
+            def update(self, value):
+                if self.total > 0:
+                    progress = min(int((value / self.total) * 100), 100)
+                    downloads[self.download_id]["progress"] = progress
+        
+        tracker = ProgressTracker(download_id)
+        
+        # Check if file exists already for resuming
+        if os.path.exists(destination):
+            file_size = os.path.getsize(destination)
+        else:
+            file_size = 0
+
+        headers = {'Range': f'bytes={file_size}-'} if file_size else None
+        response = requests.get(url, headers=headers, stream=True)
+        total_size = int(response.headers.get('content-length', 0))
+        tracker.total = total_size + file_size
+        
+        with open(destination, 'ab') as file:
+            for data in response.iter_content(chunk_size=1024 * 1024):  # 1MB chunks
+                if data:
+                    file.write(data)
+                    tracker.update(file.tell())
+        
+        downloads[download_id]["status"] = "completed"
+        
+    except Exception as e:
+        downloads[download_id]["status"] = "failed"
+        downloads[download_id]["error"] = str(e)
+
+@app.route('/api/download/status/<download_id>', methods=['GET'])
 def get_download_status(download_id):
-    if download_id not in download_status:
-        return jsonify({'error': 'Download not found'}), 404
+    if download_id not in downloads:
+        return jsonify({"error": "Download ID not found"}), 404
     
-    return jsonify(download_status[download_id])
+    return jsonify(downloads[download_id])
+
+@app.route('/api/download/list', methods=['GET'])
+def list_downloads():
+    return jsonify({"downloads": downloads})
+
+@app.route('/api/download/file/<download_id>', methods=['GET'])
+def download_file(download_id):
+    if download_id not in downloads:
+        return jsonify({"error": "Download ID not found"}), 404
+    
+    download_info = downloads[download_id]
+    if download_info["status"] != "completed":
+        return jsonify({"error": "Download not completed yet"}), 400
+    
+    file_path = download_info["file_path"]
+    if not os.path.exists(file_path):
+        return jsonify({"error": "File not found"}), 404
+    
+    try:
+        return send_file(file_path, as_attachment=True)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    # Make sure the download folder exists
+    os.makedirs(DOWNLOAD_FOLDER, exist_ok=True)
+    # Run the Flask app
+    app.run(host='0.0.0.0', port=5000, debug=True)

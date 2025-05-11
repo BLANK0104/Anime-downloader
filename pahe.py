@@ -136,7 +136,7 @@ def dl_apahe1(anime_id: str, episode_ids: list) -> dict:
     global url
     urls = [f'{url}play/{anime_id}/{episode_id}' for episode_id in episode_ids]
     # print("urls : ", urls)
-    response_futures = grequests.map((grequests.get(url=url, headers=headers) for url in urls), size=10)
+    response_futures = grequests.map((grequests.get(url=u, headers=headers) for u in urls), size=10)
 
     data_dict = {}
     for index, response in enumerate(response_futures):
